@@ -46,8 +46,8 @@ def get_background(name: str):
     tiles = []
 
     """
-    `for x in range(WIDTH // width + 1):` Esto es para obtener la cantidad de tiles en la imagen horizontales. 
-    `for y in range(HEIGHT // height + 1):` Esto es para obtener la cantidad de tiles en la imagen verticales.
+    `for x in range(WIDTH // width + 1):` Esto es para obtener la cantidad de tiles en la imagen. Horizontales. 
+    `for y in range(HEIGHT // height + 1):` Esto es para obtener la cantidad de tiles en la imagen. verticales.
     `pos = (x * width, y * height)` Esto es para obtener la posición de cada tile en la imagen. 
     `tiles.append(pos)` Esto es para agregar la posición de cada tile a la lista `tiles`.
     """
