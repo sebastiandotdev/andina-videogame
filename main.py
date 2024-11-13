@@ -57,7 +57,7 @@ def get_block(size):
 class Player(pygame.sprite.Sprite):
     COLOR = (255, 0, 0)
     GRAVITY = 1
-    GROWTH_SCALE = 1.2
+    GROWTH_SCALE = 5
     SPRITES = load_sprite_sheets("character", "main", 32, 32, True)
     ANIMATION_DELAY = 3
 
@@ -137,7 +137,7 @@ class Player(pygame.sprite.Sprite):
         new_width = int(self.rect.width * self.GROWTH_SCALE)
         new_height = int(self.rect.height * self.GROWTH_SCALE)
         self.rect = pygame.Rect(self.rect.x, self.rect.y, new_width, new_height)
-        self.update()  # Actualizar el sprite del jugador
+        self.update()  # Actualizar el sprite del jugador después de cambiar el tamaño
 
     def update_sprite(self):
         sprite_sheet = "idle"
