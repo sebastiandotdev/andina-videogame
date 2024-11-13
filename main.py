@@ -1,104 +1,369 @@
+import os
+import random
+import math
 import pygame
-import numpy as np
+from os import listdir
+from os.path import isfile, join
 
-# Inicializamos Pygame
 pygame.init()
 
-# Configuración de pantalla y colores
-WIDTH, HEIGHT = 800, 600
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Juego estilo Mario con Transformaciones Lineales")
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
-RED = (255, 0, 0)
+pygame.display.set_caption("Platformer")
 
-# Variables del personaje
-character = pygame.Rect(100, 450, 40, 40)  # Rectángulo que representa al personaje
-character_color = (0, 128, 255)
-character_velocity_x = 0
-character_velocity_y = 0
-gravity = 0.5
-is_jumping = False
-scale_factor = 1.0
-rotation_angle = 0
+WIDTH, HEIGHT = 1000, 800
+FPS = 60
+PLAYER_VEL = 5
 
-# Plataformas
-platforms = [pygame.Rect(50, 500, 700, 20), pygame.Rect(400, 400, 150, 20)]
+window = pygame.display.set_mode((WIDTH, HEIGHT))
 
-# Enemigo
-enemy = pygame.Rect(600, 450, 40, 40)
 
-# Función para aplicar transformaciones y dibujar al personaje
-def draw_transformed_character(surface, rect, scale, angle):
-    scaled_size = (int(rect.width * scale), int(rect.height * scale))
-    transformed_surface = pygame.Surface(scaled_size, pygame.SRCALPHA)
-    pygame.draw.rect(transformed_surface, character_color, transformed_surface.get_rect())
-    
-    # Rotación
-    rotated_surface = pygame.transform.rotate(transformed_surface, angle)
-    new_rect = rotated_surface.get_rect(center=rect.center)
-    surface.blit(rotated_surface, new_rect)
+def flip(sprites):
+    return [pygame.transform.flip(sprite, True, False) for sprite in sprites]
 
-# Ciclo principal del juego
-running = True
-while running:
-    screen.fill(WHITE)  # Fondo blanco
 
-    # Eventos del juego
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-    
+def load_sprite_sheets(dir1, dir2, width, height, direction=False):
+    path = join("assets", dir1, dir2)
+    images = [f for f in listdir(path) if isfile(join(path, f))]
+
+    all_sprites = {}
+
+    for image in images:
+        sprite_sheet = pygame.image.load(join(path, image)).convert_alpha()
+
+        sprites = []
+        for i in range(sprite_sheet.get_width() // width):
+            surface = pygame.Surface((width, height), pygame.SRCALPHA, 32)
+            rect = pygame.Rect(i * width, 0, width, height)
+            surface.blit(sprite_sheet, (0, 0), rect)
+            sprites.append(pygame.transform.scale2x(surface))
+
+        if direction:
+            all_sprites[image.replace(".png", "") + "_right"] = sprites
+            all_sprites[image.replace(".png", "") + "_left"] = flip(sprites)
+        else:
+            all_sprites[image.replace(".png", "")] = sprites
+
+    return all_sprites
+
+
+def get_block(size):
+    path = join("assets", "floor", "terrain.png")
+    image = pygame.image.load(path).convert_alpha()
+    surface = pygame.Surface((size, size), pygame.SRCALPHA, 32)
+    rect = pygame.Rect(96, 0, size, size)
+    surface.blit(image, (0, 0), rect)
+    return pygame.transform.scale2x(surface)
+
+
+class Player(pygame.sprite.Sprite):
+    COLOR = (255, 0, 0)
+    GRAVITY = 1
+    GROWTH_SCALE = 1.2
+    SPRITES = load_sprite_sheets("character", "main", 32, 32, True)
+    ANIMATION_DELAY = 3
+
+    def __init__(self, x, y, width, height):
+        super().__init__()
+        self.rect = pygame.Rect(x, y, width, height)
+        self.x_vel = 0
+        self.y_vel = 0
+        self.mask = None
+        self.direction = "left"
+        self.animation_count = 0
+        self.fall_count = 0
+        self.jump_count = 0
+        self.hit = False
+        self.hit_count = 0
+        self.sprite = self.SPRITES["idle_left"][0]  # Set a default sprite
+        self.update_sprite()  # Initialize sprite and mask
+
+    def jump(self):
+        self.y_vel = -self.GRAVITY * 8
+        self.animation_count = 0
+        self.jump_count += 1
+        if self.jump_count == 1:
+            self.fall_count = 0
+
+    def move(self, dx, dy):
+        self.rect.x += dx
+        self.rect.y += dy
+
+    def make_hit(self):
+        self.hit = True
+
+    def move_left(self, vel):
+        self.x_vel = -vel
+        if self.direction != "left":
+            self.direction = "left"
+            self.animation_count = 0
+
+    def move_right(self, vel):
+        self.x_vel = vel
+        if self.direction != "right":
+            self.direction = "right"
+            self.animation_count = 0
+
+    def loop(self, fps):
+        self.y_vel += min(1, (self.fall_count / fps) * self.GRAVITY)
+        self.move(self.x_vel, self.y_vel)
+
+        if self.hit:
+            self.hit_count += 1
+        if self.hit_count > fps * 2:
+            self.hit = False
+            self.hit_count = 0
+
+        self.fall_count += 1
+
+        # Verifica si el jugador ha aterrizado en el suelo y detén la caída
+        if (
+            self.rect.bottom >= HEIGHT - 50
+        ):  # Suponiendo que el suelo está a una altura de 50 píxeles del fondo
+            self.rect.bottom = HEIGHT - 50
+            self.landed()
+
+        self.update_sprite()
+
+    def landed(self):
+        self.fall_count = 0
+        self.y_vel = 0  # Reset vertical velocity when landing
+        self.jump_count = 0  # Reset jump count
+
+    def hit_head(self):
+        self.count = 0
+        self.y_vel *= -1
+
+    def eat_apple(self):
+        # Método para crecer al comer la manzana
+        new_width = int(self.rect.width * self.GROWTH_SCALE)
+        new_height = int(self.rect.height * self.GROWTH_SCALE)
+        self.rect = pygame.Rect(self.rect.x, self.rect.y, new_width, new_height)
+        self.update()  # Actualizar el sprite del jugador
+
+    def update_sprite(self):
+        sprite_sheet = "idle"
+        if self.hit:
+            sprite_sheet = "hit"
+        elif self.y_vel < 0:
+            if self.jump_count == 1:
+                sprite_sheet = "jump"
+            elif self.jump_count == 2:
+                sprite_sheet = "double_jump"
+        elif self.y_vel > self.GRAVITY * 2:
+            sprite_sheet = "fall"
+        elif self.x_vel != 0:
+            sprite_sheet = "run"
+
+        sprite_sheet_name = sprite_sheet + "_" + self.direction
+        sprites = self.SPRITES[sprite_sheet_name]
+        sprite_index = (self.animation_count // self.ANIMATION_DELAY) % len(sprites)
+        self.sprite = sprites[sprite_index]
+        self.animation_count += 1
+        self.update()
+
+    def update(self):
+        self.rect = self.sprite.get_rect(topleft=(self.rect.x, self.rect.y))
+        self.mask = pygame.mask.from_surface(self.sprite)
+
+    def draw(self, win, offset_x):
+        win.blit(self.sprite, (self.rect.x - offset_x, self.rect.y))
+
+
+class Object(pygame.sprite.Sprite):
+    def __init__(self, x, y, width, height, name=None):
+        super().__init__()
+        self.rect = pygame.Rect(x, y, width, height)
+        self.image = pygame.Surface((width, height), pygame.SRCALPHA)
+        self.width = width
+        self.height = height
+        self.name = name
+
+    def draw(self, win, offset_x):
+        win.blit(self.image, (self.rect.x - offset_x, self.rect.y))
+
+
+class Block(Object):
+    def __init__(self, x, y, size):
+        super().__init__(x, y, size, size)
+        block = get_block(size)
+        self.image.blit(block, (0, 0))
+        self.mask = pygame.mask.from_surface(self.image)  # Ensure the mask is correct
+
+
+class Apple(Object):
+    SPRITES = load_sprite_sheets("objects", "apple", 32, 32)
+
+    def __init__(self, x, y):
+        super().__init__(x, y, 32, 32)
+        self.sprites = self.SPRITES["apple"]
+        self.animation_count = 0
+        self.image = self.sprites[self.animation_count]
+        self.mask = pygame.mask.from_surface(self.image)
+        self.speed = 2
+        self.eaten = False
+
+    def update(self, objects):
+        if not self.eaten:
+            # Caer
+            self.rect.y += self.speed
+            # Verifica la colisión con los objetos
+            vertical_collide = handle_vertical_collision(self, objects, self.speed)
+            if vertical_collide:
+                self.speed = 0  # Detiene la caída cuando colisiona
+            # Actualiza la animación
+            self.animation_count += 1
+            if self.animation_count >= len(self.sprites) * 10:
+                self.animation_count = 0
+            self.image = self.sprites[self.animation_count // 10]
+            self.mask = pygame.mask.from_surface(self.image)
+
+    def eat(self):
+        self.eaten = True
+        self.image = self.sprites[0]  # Manzana en estado comido
+        self.mask = pygame.mask.from_surface(self.image)
+
+    def draw(self, win, offset_x):
+        if not self.eaten:
+            win.blit(self.image, (self.rect.x - offset_x, self.rect.y))
+
+
+def get_background(name):
+    # Cargar la imagen de fondo
+    image = pygame.image.load(join("assets", "background", name))
+
+    # Escalar la imagen a un cuarto de su tamaño original para que se vea mucho más lejana
+    scaled_width = image.get_width() // 4
+    scaled_height = image.get_height() // 4
+    image = pygame.transform.scale(image, (scaled_width, scaled_height))
+
+    tiles = []
+
+    # Calcular el número de mosaicos necesarios para llenar la pantalla
+    for i in range(WIDTH // scaled_width + 1):
+        for j in range(HEIGHT // scaled_height + 1):
+            pos = (i * scaled_width, j * scaled_height)
+            tiles.append(pos)
+
+    return tiles, image
+
+
+def draw(window, background, bg_image, player, objects, offset_x):
+    for tile in background:
+        window.blit(bg_image, tile)
+
+    for obj in objects:
+        obj.draw(window, offset_x)
+
+    player.draw(window, offset_x)
+
+    pygame.display.update()
+
+
+def handle_vertical_collision(player, objects, dy):
+    collided_objects = []
+    for obj in objects:
+        if pygame.sprite.collide_mask(player, obj):
+            if dy > 0:  # Moving downward (falling)
+                player.rect.bottom = obj.rect.top
+                # Only call landed() if the object is the player
+                if isinstance(player, Player):
+                    player.landed()  # Call to land method
+                collided_objects.append(obj)
+            elif dy < 0:  # Moving upward (hitting head)
+                player.rect.top = obj.rect.bottom
+                player.hit_head()  # Call to hit_head method
+                collided_objects.append(obj)
+
+    return collided_objects
+
+
+def collide(player, objects, dx):
+    player.move(dx, 0)
+    player.update()
+    collided_object = None
+    for obj in objects:
+        if pygame.sprite.collide_mask(player, obj):
+            collided_object = obj
+            break
+
+    player.move(-dx, 0)
+    player.update()
+    return collided_object
+
+
+def handle_move(player, objects):
     keys = pygame.key.get_pressed()
-    
-    # Movimiento horizontal
-    character_velocity_x = 0
-    if keys[pygame.K_LEFT]:
-        character_velocity_x = -5
-    if keys[pygame.K_RIGHT]:
-        character_velocity_x = 5
-    
-    # Saltar
-    if keys[pygame.K_SPACE] and not is_jumping:
-        character_velocity_y = -10
-        is_jumping = True
-    
-    # Transformaciones aplicadas con teclas adicionales
-    if keys[pygame.K_s]:
-        scale_factor += 0.1  # Escalado
-    if keys[pygame.K_d]:
-        scale_factor = max(0.5, scale_factor - 0.1)
-    if keys[pygame.K_r]:
-        rotation_angle += 5  # Rotación en grados
-    if keys[pygame.K_p]:
-        character.y = HEIGHT - character.height  # Proyección en el suelo
 
-    # Actualización de posición y gravedad
-    character.x += character_velocity_x
-    character_velocity_y += gravity
-    character.y += character_velocity_y
+    player.x_vel = 0
+    collide_left = collide(player, objects, -PLAYER_VEL * 2)
+    collide_right = collide(player, objects, PLAYER_VEL * 2)
 
-    # Colisión con plataformas
-    for platform in platforms:
-        if character.colliderect(platform) and character_velocity_y >= 0:
-            character.y = platform.y - character.height
-            character_velocity_y = 0
-            is_jumping = False
+    if keys[pygame.K_LEFT] and not collide_left:
+        player.move_left(PLAYER_VEL)
+    if keys[pygame.K_RIGHT] and not collide_right:
+        player.move_right(PLAYER_VEL)
 
-    # Colisión con enemigos y reflejo (rebote)
-    if character.colliderect(enemy):
-        character_velocity_x *= -1  # Invertimos la dirección (reflexión)
+    vertical_collide = handle_vertical_collision(player, objects, player.y_vel)
+    to_check = [collide_left, collide_right, *vertical_collide]
 
-    # Dibujar plataformas y enemigos
-    for platform in platforms:
-        pygame.draw.rect(screen, BLACK, platform)
-    pygame.draw.rect(screen, RED, enemy)  # Enemigo en rojo
 
-    # Dibujamos al personaje con sus transformaciones
-    draw_transformed_character(screen, character, scale_factor, rotation_angle)
+def main(window):
+    clock = pygame.time.Clock()
+    background, bg_image = get_background("selva.jpg")
 
-    pygame.display.flip()  # Actualizamos la pantalla
-    pygame.time.delay(30)
+    block_size = 96
 
-# Finalizamos Pygame
-pygame.quit()
+    player = Player(100, 100, 50, 50)
+    player.update()  # Ensure the mask is created for player
+    apple = Apple(
+        WIDTH // 2 - 16, HEIGHT - block_size * 2 - 32
+    )  # Ajuste de posición para centrar en el camino
+    floor = [
+        Block(i * block_size, HEIGHT - block_size, block_size)
+        for i in range(-WIDTH // block_size, (WIDTH * 2) // block_size)
+    ]
+    objects = [
+        *floor,
+        Block(0, HEIGHT - block_size * 2, block_size),
+        Block(block_size * 3, HEIGHT - block_size * 4, block_size),
+        apple,
+    ]
+
+    offset_x = 0
+    scroll_area_width = 200
+
+    run = True
+    while run:
+        clock.tick(FPS)
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                run = False
+                break
+
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE and player.jump_count < 2:
+                    player.jump()
+
+        apple.update(objects)
+
+        player.loop(FPS)
+        handle_move(player, objects)
+        draw(window, background, bg_image, player, objects, offset_x)
+
+        if player.mask and apple.mask and pygame.sprite.collide_mask(player, apple):
+            player.eat_apple()  # El jugador crece
+            apple.eat()  # La manzana ha sido comida
+            apple.kill()  # Elimina la manzana después de ser comida
+
+        if (
+            (player.rect.right - offset_x >= WIDTH - scroll_area_width)
+            and player.x_vel > 0
+        ) or ((player.rect.left - offset_x <= scroll_area_width) and player.x_vel < 0):
+            offset_x += player.x_vel
+
+    pygame.quit()
+    quit()
+
+
+if __name__ == "__main__":
+    main(window)
