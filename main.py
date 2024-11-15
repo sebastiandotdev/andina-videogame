@@ -155,25 +155,19 @@ class Player(pygame.sprite.Sprite):
 
     def return_to_normal(self):
         if self.is_big:
-            # Cambiar el estado y restaurar el tamaño
-            self.is_big = False
+            # Restaurar tamaño original del rectángulo y del sprite
+            self.rect.width, self.rect.height = self.original_width, self.original_height
             bottom = self.rect.bottom
-            self.rect.width, self.rect.height = (
-                self.original_width,
-                self.original_height,
-            )
             self.rect.bottom = bottom
 
-            # Resetear todos los sprites a su tamaño original
+            # Restaurar todos los sprites en el sprite sheet a su tamaño original
             for key in self.SPRITES:
                 self.SPRITES[key] = [
-                    pygame.transform.scale(
-                        sprite, (32, 32)
-                    )
+                    pygame.transform.scale(sprite, (self.original_width, self.original_height))
                     for sprite in self.SPRITES[key]
                 ]
 
-            # Asegúrate de actualizar la máscara para la nueva escala
+            self.is_big = False
             self.update()
 
     def update_sprite(self):
@@ -410,6 +404,9 @@ def main(window):
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE and player.jump_count < 2:
                     player.jump()
+
+                if event.key == pygame.K_b:
+                    player.return_to_normal() 
 
         if apple:
             apple.update(objects)
