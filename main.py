@@ -72,6 +72,7 @@ class Player(pygame.sprite.Sprite):
         self.fall_count = 0
         self.jump_count = 0
         self.hit = False
+        self.is_big = False
         self.hit_count = 0
         self.sprite = self.SPRITES["idle_left"][0]  # Set a default sprite
         self.update_sprite()  # Initialize sprite and mask
@@ -133,11 +134,47 @@ class Player(pygame.sprite.Sprite):
         self.y_vel *= -1
 
     def eat_apple(self):
-        # Método para crecer al comer la manzana
-        new_width = int(self.rect.width * self.GROWTH_SCALE)
-        new_height = int(self.rect.height * self.GROWTH_SCALE)
-        self.rect = pygame.Rect(self.rect.x, self.rect.y, new_width, new_height)
-        self.update()  # Actualizar el sprite del jugador después de cambiar el tamaño
+        if not self.is_big:
+            # Guardar el tamaño original
+            self.original_width, self.original_height = (
+                self.rect.width,
+                self.rect.height,
+            )
+            bottom = self.rect.bottom
+
+            # Doblar tamaño
+            self.rect.width *= 2
+            self.rect.height *= 2
+            self.rect.bottom = bottom
+
+            self.sprite = pygame.transform.scale(
+                self.sprite, (self.rect.width, self.rect.height)
+            )
+            self.is_big = True
+            self.update()
+
+    def return_to_normal(self):
+        if self.is_big:
+            # Cambiar el estado y restaurar el tamaño
+            self.is_big = False
+            bottom = self.rect.bottom
+            self.rect.width, self.rect.height = (
+                self.original_width,
+                self.original_height,
+            )
+            self.rect.bottom = bottom
+
+            # Resetear todos los sprites a su tamaño original
+            for key in self.SPRITES:
+                self.SPRITES[key] = [
+                    pygame.transform.scale(
+                        sprite, (32, 32)
+                    )
+                    for sprite in self.SPRITES[key]
+                ]
+
+            # Asegúrate de actualizar la máscara para la nueva escala
+            self.update()
 
     def update_sprite(self):
         sprite_sheet = "idle"
@@ -166,6 +203,18 @@ class Player(pygame.sprite.Sprite):
 
     def draw(self, win, offset_x):
         win.blit(self.sprite, (self.rect.x - offset_x, self.rect.y))
+
+        # Create reflection
+        reflection = pygame.transform.flip(self.sprite, False, True)
+        reflection.set_alpha(128)  # Make reflection semi-transparent
+
+        # Calculate reflection position (below the character)
+        reflection_y = (
+            self.rect.bottom + 5
+        )  # Add small gap between character and reflection
+
+        # Draw the reflection
+        win.blit(reflection, (self.rect.x - offset_x, reflection_y))
 
 
 class Object(pygame.sprite.Sprite):
@@ -224,6 +273,18 @@ class Apple(Object):
     def draw(self, win, offset_x):
         if not self.eaten:
             win.blit(self.image, (self.rect.x - offset_x, self.rect.y))
+
+
+class Tree(Object):
+    def __init__(self, x, y):
+        # Initialize with larger dimensions for the tree
+        super().__init__(x, y, 64, 96)  # Adjust size as needed
+        self.image = pygame.image.load(
+            join("assets", "objects", "tree", "tree.png")
+        ).convert_alpha()
+        self.image = pygame.transform.scale(self.image, (self.width, self.height))
+        self.mask = pygame.mask.from_surface(self.image)
+        self.rect.bottom = HEIGHT - 85  # Ajusta según la altura del suelo
 
 
 def get_background(name):
@@ -317,6 +378,8 @@ def main(window):
     apple = Apple(
         WIDTH // 2 - 16, HEIGHT - block_size * 2 - 32
     )  # Ajuste de posición para centrar en el camino
+    # Create tree object
+    tree = Tree(WIDTH - 200, HEIGHT - block_size - 96)  # Position the tree
     floor = [
         Block(i * block_size, HEIGHT - block_size, block_size)
         for i in range(-WIDTH // block_size, (WIDTH * 2) // block_size)
@@ -326,10 +389,14 @@ def main(window):
         Block(0, HEIGHT - block_size * 2, block_size),
         Block(block_size * 3, HEIGHT - block_size * 4, block_size),
         apple,
+        tree,
     ]
 
     offset_x = 0
     scroll_area_width = 200
+
+    all_sprites = pygame.sprite.Group()
+    all_sprites.add(apple)
 
     run = True
     while run:
@@ -344,16 +411,39 @@ def main(window):
                 if event.key == pygame.K_SPACE and player.jump_count < 2:
                     player.jump()
 
-        apple.update(objects)
+        if apple:
+            apple.update(objects)
 
         player.loop(FPS)
         handle_move(player, objects)
         draw(window, background, bg_image, player, objects, offset_x)
 
-        if player.mask and apple.mask and pygame.sprite.collide_mask(player, apple):
-            player.eat_apple()  # El jugador crece
-            apple.eat()  # La manzana ha sido comida
-            apple.kill()  # Elimina la manzana después de ser comida
+        if (
+            apple
+            and not apple.eaten
+            and player.mask
+            and apple.mask
+            and pygame.sprite.collide_mask(player, apple)
+        ):
+            # Scale all sprites in the player's sprite sheet
+            for key in player.SPRITES:
+                player.SPRITES[key] = [
+                    pygame.transform.scale(
+                        sprite, (sprite.get_width() * 2, sprite.get_height() * 2)
+                    )
+                    for sprite in player.SPRITES[key]
+                ]
+            player.eat_apple()
+
+            # Remove apple from objects list and mark as eaten
+            objects.remove(apple)
+            apple.eaten = True
+            all_sprites.remove(apple)
+            apple = None
+
+            # Inside the main game loop
+            if player.is_big and pygame.sprite.collide_mask(player, tree):
+                player.return_to_normal()
 
         if (
             (player.rect.right - offset_x >= WIDTH - scroll_area_width)
